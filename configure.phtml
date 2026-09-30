@@ -1,0 +1,268 @@
+<?php
+declare(strict_types=1);
+/** @var DailyDigestExtension $this */
+if (!isset($this)) {
+	http_response_code(403);
+	die('Forbidden');
+}
+
+$cfg = $this->cfg();
+$api = $this->resolveApi($cfg);
+$e = static fn(mixed $s): string => htmlspecialchars(is_scalar($s) ? (string)$s : '', ENT_QUOTES, 'UTF-8');
+$val = static fn(string $k, mixed $d = ''): mixed => (isset($cfg[$k]) && $cfg[$k] !== '') ? $cfg[$k] : $d;
+
+$selectedCats = $this->selectedCategoryIds($cfg);
+$perCat = $this->mode($cfg) === DailyDigestExtension::MODE_PER_CATEGORY;
+$selectable = $this->selectableCategories();
+$targets = $perCat ? $this->perCategoryTargets($cfg) : [];
+$catFeeds = is_array($cfg['cat_feeds'] ?? null) ? $cfg['cat_feeds'] : [];
+$feedName = $this->feedName($cfg);
+$times = DailyDigestExtension::formatTimes($this->scheduleTimes($cfg));
+$hasOwnKey = is_string($cfg['api_key'] ?? null) && $cfg['api_key'] !== '';
+$fb = $this->resolveFallback($cfg);
+$hasFbKey = $fb['key'] !== '';
+$internalBase = $this->internalBase($cfg);
+$next = $this->nextSlot(time(), $cfg);
+$lastRun = isset($cfg['last_run']) && is_numeric($cfg['last_run']) ? date('Y-m-d H:i', (int)$cfg['last_run']) : _t('ext.daily_digest.status.never');
+$none = _t('ext.daily_digest.status.none');
+
+$formAction = _url('extension', 'configure', 'e', $this->getName());
+if (Minz_Request::paramBoolean('ajax')) {
+	$formAction .= '&ajax=1';
+}
+?>
+<div class="post">
+	<h2><?= _t('ext.daily_digest.title') ?></h2>
+
+	<?php if ($this->flashMessage !== null): ?>
+		<div class="alert alert-<?= $this->flashSuccess ? 'success' : 'error' ?>">
+			<span class="alert-head"><?= $this->flashSuccess ? '✓' : '✗' ?></span>
+			<?= $e($this->flashMessage) ?>
+			<?php if ($this->flashLines !== []): ?>
+				<ul><?php foreach ($this->flashLines as $line): ?><li><?= $e($line) ?></li><?php endforeach; ?></ul>
+			<?php endif; ?>
+		</div>
+	<?php endif; ?>
+
+	<p><?= _t('ext.daily_digest.intro', $e($feedName)) ?></p>
+
+	<div class="alert alert-warn">
+		<p><strong><?= _t('ext.daily_digest.status.title') ?></strong></p>
+		<ul>
+			<li><?= _t('ext.daily_digest.status.api', $e($api['endpoint']),
+				$api['key'] !== '' ? _t('ext.daily_digest.status.configured') : '<strong>' . _t('ext.daily_digest.status.missing') . '</strong>',
+				$api['model'] !== '' ? '<code>' . $e($api['model']) . '</code>' : '<strong>' . _t('ext.daily_digest.status.missing') . '</strong>') ?></li>
+			<li><?= _t('ext.daily_digest.status.fallback', $fb['enabled']
+				? '<code>' . $e($fb['model']) . '</code> (' . $e($fb['endpoint']) . ')' : _t('ext.daily_digest.status.disabled')) ?></li>
+			<li><?= _t('ext.daily_digest.status.internal_links', $e($internalBase . '/i/?get=f_…&state=3&search=e%3A…')) ?>
+				<?= $val('internal_base') === '' ? _t('ext.daily_digest.status.relative') : '' ?></li>
+			<li><?= _t('ext.daily_digest.status.next', $next !== null ? $e(date('Y-m-d H:i', $next)) : $none) ?></li>
+			<li><?= _t('ext.daily_digest.status.last_run', $e($lastRun), $e($val('last_slot', $none))) ?></li>
+			<li><?= _t('ext.daily_digest.status.mode', $perCat
+				? _t('ext.daily_digest.status.mode_per_category', count($targets)) : _t('ext.daily_digest.status.mode_combined')) ?></li>
+			<li><?= _t('ext.daily_digest.status.last_result', $e($val('last_result', $none))) ?></li>
+			<?php if ($perCat): ?>
+				<?php foreach ($targets as $cat): $st = $this->catState($cfg, $cat['id']); ?>
+					<li>
+						<strong><?= $e($cat['name']) ?></strong>
+						<?= isset($catFeeds[$cat['id']])
+							? _t('ext.daily_digest.status.cat_feed', is_numeric($catFeeds[$cat['id']]) ? (int)$catFeeds[$cat['id']] : 0)
+							: _t('ext.daily_digest.status.cat_feed_pending') ?>:
+						<?= $e(is_string($st['last_result'] ?? null) ? $st['last_result'] : _t('ext.daily_digest.status.cat_never')) ?>
+					</li>
+				<?php endforeach; ?>
+				<?php if ($targets === []): ?>
+					<li><strong><?= _t('ext.daily_digest.status.no_category') ?></strong></li>
+				<?php endif; ?>
+			<?php endif; ?>
+		</ul>
+	</div>
+
+	<form action="<?= $formAction ?>" method="post">
+		<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+
+		<fieldset>
+			<legend><?= _t('ext.daily_digest.api.title') ?></legend>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_api_endpoint"><?= _t('ext.daily_digest.api.endpoint') ?></label>
+				<div class="group-controls">
+					<input type="url" id="dd_api_endpoint" name="api_endpoint" class="long"
+						value="<?= $e($api['endpoint']) ?>" placeholder="<?= $e(DailyDigestExtension::DEFAULT_ENDPOINT) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.api.endpoint_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_api_key"><?= _t('ext.daily_digest.api.key') ?></label>
+				<div class="group-controls">
+					<input type="password" id="dd_api_key" name="api_key" class="long" value="" autocomplete="new-password"
+						placeholder="<?= $e($hasOwnKey ? _t('ext.daily_digest.api.key_saved') : _t('ext.daily_digest.api.key_required')) ?>" />
+					<?php if ($hasOwnKey): ?>
+						<label class="checkbox" for="dd_clear_api_key">
+							<input type="checkbox" id="dd_clear_api_key" name="clear_api_key" value="1" />
+							<?= _t('ext.daily_digest.api.key_clear') ?>
+						</label>
+					<?php endif; ?>
+					<p class="help-block"><?= _t('ext.daily_digest.api.key_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_model"><?= _t('ext.daily_digest.api.model') ?></label>
+				<div class="group-controls">
+					<input type="text" id="dd_model" name="model" value="<?= $e($val('model')) ?>"
+						placeholder="<?= $e(_t('ext.daily_digest.api.example', DailyDigestExtension::DEFAULT_MODEL_PLACEHOLDER)) ?>" />
+				</div>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend><?= _t('ext.daily_digest.fallback.title') ?></legend>
+			<p class="help-block"><?= _t('ext.daily_digest.fallback.help') ?></p>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_fallback_endpoint"><?= _t('ext.daily_digest.fallback.endpoint') ?></label>
+				<div class="group-controls">
+					<input type="url" id="dd_fallback_endpoint" name="fallback_endpoint" class="long"
+						value="<?= $e($val('fallback_endpoint')) ?>" placeholder="https://…/v1" />
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_fallback_key"><?= _t('ext.daily_digest.fallback.key') ?></label>
+				<div class="group-controls">
+					<input type="password" id="dd_fallback_key" name="fallback_key" class="long" value="" autocomplete="new-password"
+						placeholder="<?= $e($hasFbKey ? _t('ext.daily_digest.api.key_saved') : _t('ext.daily_digest.fallback.key_empty')) ?>" />
+					<?php if ($hasFbKey): ?>
+						<label class="checkbox" for="dd_clear_fallback_key">
+							<input type="checkbox" id="dd_clear_fallback_key" name="clear_fallback_key" value="1" />
+							<?= _t('ext.daily_digest.fallback.key_clear') ?>
+						</label>
+					<?php endif; ?>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_fallback_model"><?= _t('ext.daily_digest.fallback.model') ?></label>
+				<div class="group-controls">
+					<input type="text" id="dd_fallback_model" name="fallback_model" value="<?= $e($val('fallback_model')) ?>" />
+				</div>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend><?= _t('ext.daily_digest.schedule.title') ?></legend>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_times"><?= _t('ext.daily_digest.schedule.times') ?></label>
+				<div class="group-controls">
+					<input type="text" id="dd_times" name="times" value="<?= $e($times) ?>" placeholder="<?= $e(DailyDigestExtension::DEFAULT_TIMES) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.schedule.times_help', $e(date_default_timezone_get())) ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name"><?= _t('ext.daily_digest.schedule.mode') ?></label>
+				<div class="group-controls">
+					<label class="radio" for="dd_mode_combined">
+						<input type="radio" id="dd_mode_combined" name="mode" value="<?= DailyDigestExtension::MODE_COMBINED ?>" <?= !$perCat ? 'checked="checked"' : '' ?> />
+						<?= _t('ext.daily_digest.schedule.mode_combined') ?>
+					</label>
+					<label class="radio" for="dd_mode_per_category">
+						<input type="radio" id="dd_mode_per_category" name="mode" value="<?= DailyDigestExtension::MODE_PER_CATEGORY ?>" <?= $perCat ? 'checked="checked"' : '' ?> />
+						<?= _t('ext.daily_digest.schedule.mode_per_category') ?>
+					</label>
+					<p class="help-block"><?= _t('ext.daily_digest.schedule.mode_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name"><?= _t('ext.daily_digest.schedule.categories') ?></label>
+				<div class="group-controls">
+					<?php foreach ($selectable as $cat): ?>
+						<label class="checkbox" for="dd_cat_<?= $cat['id'] ?>">
+							<input type="checkbox" id="dd_cat_<?= $cat['id'] ?>" name="categories[]" value="<?= $cat['id'] ?>"
+								<?= in_array($cat['id'], $selectedCats, true) ? 'checked="checked"' : '' ?> />
+							<?= $e($cat['name']) ?>
+						</label>
+					<?php endforeach; ?>
+					<p class="help-block"><?= _t('ext.daily_digest.schedule.categories_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_max_articles"><?= _t('ext.daily_digest.schedule.max_articles') ?></label>
+				<div class="group-controls">
+					<input type="number" id="dd_max_articles" name="max_articles" min="5" max="1000"
+						value="<?= $e($val('max_articles', DailyDigestExtension::DEFAULT_MAX_ARTICLES)) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.schedule.max_articles_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_excerpt_length"><?= _t('ext.daily_digest.schedule.excerpt_length') ?></label>
+				<div class="group-controls">
+					<input type="number" id="dd_excerpt_length" name="excerpt_length" min="0" max="5000"
+						value="<?= $e($val('excerpt_length', DailyDigestExtension::DEFAULT_EXCERPT_LENGTH)) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.schedule.excerpt_length_help') ?></p>
+				</div>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend><?= _t('ext.daily_digest.output.title') ?></legend>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_language"><?= _t('ext.daily_digest.output.language') ?></label>
+				<div class="group-controls">
+					<input type="text" id="dd_language" name="language" value="<?= $e($this->language($cfg)) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.output.language_help', $e(DailyDigestExtension::defaultLanguage())) ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_prompt"><?= _t('ext.daily_digest.output.prompt') ?></label>
+				<div class="group-controls">
+					<textarea id="dd_prompt" name="prompt" rows="14" class="long" style="width:100%;"><?= $e($this->prompt($cfg)) ?></textarea>
+					<p class="help-block"><?= _t('ext.daily_digest.output.prompt_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_feed_name"><?= _t('ext.daily_digest.output.feed_name') ?></label>
+				<div class="group-controls">
+					<input type="text" id="dd_feed_name" name="feed_name" value="<?= $e($feedName) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.output.feed_name_help', $e($feedName)) ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_internal_base"><?= _t('ext.daily_digest.output.internal_base') ?></label>
+				<div class="group-controls">
+					<input type="url" id="dd_internal_base" name="internal_base" class="long"
+						value="<?= $e($val('internal_base')) ?>" placeholder="<?= $e(_t('ext.daily_digest.output.internal_base_placeholder')) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.output.internal_base_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<div class="group-controls">
+					<label class="checkbox" for="dd_mark_read">
+						<input type="checkbox" id="dd_mark_read" name="mark_read" value="1" <?= !empty($cfg['mark_read']) ? 'checked="checked"' : '' ?> />
+						<?= _t('ext.daily_digest.output.mark_read') ?>
+					</label>
+				</div>
+			</div>
+		</fieldset>
+
+		<div class="form-group form-actions">
+			<div class="group-controls">
+				<button type="submit" class="btn btn-important" name="dd_action" value="save"><?= _t('ext.daily_digest.actions.save') ?></button>
+				<button type="submit" class="btn btn-attention" name="dd_action" value="test"><?= _t('ext.daily_digest.actions.test') ?></button>
+				<button type="submit" class="btn" name="dd_action" value="generate"><?= _t('ext.daily_digest.actions.generate') ?></button>
+				<p class="help-block"><?= _t('ext.daily_digest.actions.help') ?></p>
+			</div>
+		</div>
+	</form>
+</div>
