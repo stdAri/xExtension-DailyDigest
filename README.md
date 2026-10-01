@@ -4,7 +4,7 @@ A [FreshRSS](https://freshrss.org) user extension that generates scheduled AI di
 
 At the configured times (default **08:00** and **20:00**), the articles added since the previous digest — across the categories you select (default: all) — are sent in a single request to any **OpenAI-compatible chat API**. The model writes a digest grouped by topic with numbered citations, which is stored as an unread article in a dedicated muted feed ("AI digest" feed, name is configurable). A **per-category** mode generates one digest per selected category instead, each in its own feed.
 
-Every citation `[n]` in the digest links to the article **inside your FreshRSS** (with the original link alongside), and a collapsible source list is appended at the end of each digest.
+Each digest opens with the key stories of the period, followed by numbered topics. Citations read `[n original]`: the number opens the article **inside your FreshRSS**, “original” the original website. A collapsible source list is appended at the end of each digest.
 
 ## Features
 
@@ -12,7 +12,8 @@ Every citation `[n]` in the digest links to the article **inside your FreshRSS**
 - Any OpenAI-compatible endpoint: OpenAI, Gemini (OpenAI-compatible endpoint), Kimi, a local model, … Only standard fields (`model` / `messages` / `stream`) are sent.
 - Optional **fallback model** (endpoint + key + model): used when the primary returns an empty completion (e.g. content-moderation aborts) or keeps failing after a retry.
 - Configurable schedule, article cap, excerpt length, target language, prompt and feed name.
-- Citations link into FreshRSS (`/i/?…` deep links); relative links are made absolute for API clients (Reeder, NetNewsWire, …) at display time.
+- Plain-markup layout (headings, lists, bold, dividers — no CSS), so digests look the same in the web UI and in reader apps that drop inline styles.
+- Citations link into FreshRSS (`/i/?…` deep links) and to the original website; relative links are made absolute for API clients (Reeder, NetNewsWire, …) at display time.
 - Retry policy with transient-error detection, per-slot attempt cap, and a lock file against concurrent runs.
 - Optional: mark source articles as read after a digest is generated.
 - Configuration page with status panel, **Test API connection** and **Generate now** buttons.
@@ -66,7 +67,8 @@ Every citation `[n]` in the digest links to the article **inside your FreshRSS**
 - A category's **first** digest covers the last 12 hours, but never articles already covered by a combined digest. Later digests go back at most 48 hours (e.g. after re-checking a long-unchecked category).
 - Switching back to combined mode continues the combined window from the last per-category run, so already-digested articles are not repeated (articles from unchecked categories are not back-filled).
 - Category → feed mapping is stored in `cat_feeds`; a lock file (`data/cache/dailydigest-<user>.lock`) prevents concurrent runs.
-- The model refers to articles only by `[n]` numbers; the extension replaces them with **in-FreshRSS links** and appends a collapsible source list (title → original article, plus an "in FreshRSS" link). The link format `/i/?get=f_<feed id>&state=3&search=e%3A<entry id>` searches one entry by id inside its feed (`state=3` = read + unread), yielding exactly one result; `f_` is used instead of `get=a` so entries of "category-only" feeds also open. Model output is filtered through a tag whitelist with all attributes stripped.
+- Layout: key points (the 5–8 most important stories across all topics, unnumbered), then the topics. The extension numbers the topic headings (「一、二、…」 when the digest language is Chinese, `1.` `2.` otherwise; numbers written by the model are replaced) and puts a `<hr>` before each topic and before the source list. Only plain tags are used (`h3 ul li strong sup hr em`), since many reader apps drop inline CSS.
+- The model refers to articles only by `[n]` numbers; the extension turns them into a superscript `[n original]`: the number links to the article **inside FreshRSS** (title as tooltip), “original” to the original website. Adjacent citations such as `[3][7]` become one group. A collapsible source list (title → inside FreshRSS, plus “original”) and a one-line legend are appended. The link format `/i/?get=f_<feed id>&state=3&search=e%3A<entry id>` searches one entry by id inside its feed (`state=3` = read + unread), yielding exactly one result; `f_` is used instead of `get=a` so entries of "category-only" feeds also open. Model output is filtered through a tag whitelist with all attributes stripped.
 - Log lines are prefixed `Daily Digest:` (see **Settings → Logs**). API keys are never logged.
 
 ## Notes
