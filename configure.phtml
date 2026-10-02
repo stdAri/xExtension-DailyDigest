@@ -152,6 +152,52 @@ if (Minz_Request::paramBoolean('ajax')) {
 		</fieldset>
 
 		<fieldset>
+			<legend><?= _t('ext.daily_digest.output.title') ?></legend>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_language"><?= _t('ext.daily_digest.output.language') ?></label>
+				<div class="group-controls">
+					<input type="text" id="dd_language" name="language" value="<?= $e($this->language($cfg)) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.output.language_help', $e(DailyDigestExtension::defaultLanguage())) ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_prompt"><?= _t('ext.daily_digest.output.prompt') ?></label>
+				<div class="group-controls">
+					<textarea id="dd_prompt" name="prompt" rows="14" class="long"><?= $e($this->prompt($cfg)) ?></textarea>
+					<p class="help-block"><?= _t('ext.daily_digest.output.prompt_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_feed_name"><?= _t('ext.daily_digest.output.feed_name') ?></label>
+				<div class="group-controls">
+					<input type="text" id="dd_feed_name" name="feed_name" value="<?= $e($feedName) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.output.feed_name_help', $e($feedName)) ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label class="group-name" for="dd_internal_base"><?= _t('ext.daily_digest.output.internal_base') ?></label>
+				<div class="group-controls">
+					<input type="url" id="dd_internal_base" name="internal_base" class="long"
+						value="<?= $e($val('internal_base')) ?>" placeholder="<?= $e(_t('ext.daily_digest.output.internal_base_placeholder')) ?>" />
+					<p class="help-block"><?= _t('ext.daily_digest.output.internal_base_help') ?></p>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<div class="group-controls">
+					<label class="checkbox" for="dd_mark_read">
+						<input type="checkbox" id="dd_mark_read" name="mark_read" value="1" <?= !empty($cfg['mark_read']) ? 'checked="checked"' : '' ?> />
+						<?= _t('ext.daily_digest.output.mark_read') ?>
+					</label>
+				</div>
+			</div>
+		</fieldset>
+
+		<fieldset>
 			<legend><?= _t('ext.daily_digest.schedule.title') ?></legend>
 
 			<div class="form-group">
@@ -181,13 +227,31 @@ if (Minz_Request::paramBoolean('ajax')) {
 				<label class="group-name"><?= _t('ext.daily_digest.schedule.categories') ?></label>
 				<div class="group-controls">
 					<?php foreach ($selectable as $cat): ?>
-						<label class="checkbox" for="dd_cat_<?= $cat['id'] ?>">
-							<input type="checkbox" id="dd_cat_<?= $cat['id'] ?>" name="categories[]" value="<?= $cat['id'] ?>"
-								<?= in_array($cat['id'], $selectedCats, true) ? 'checked="checked"' : '' ?> />
-							<?= $e($cat['name']) ?>
-						</label>
+						<?php
+						$catPrompt = $this->categoryPrompt($cfg, $cat['id']);
+						$catExcerpt = $this->categoryExcerptLength($cfg, $cat['id']);
+						$hasSettings = $catPrompt !== '' || $catExcerpt !== null;
+						?>
+						<div class="dd-cat">
+							<label class="checkbox" for="dd_cat_<?= $e((string)$cat['id']) ?>">
+								<input type="checkbox" id="dd_cat_<?= $e((string)$cat['id']) ?>" name="categories[]" value="<?= $e((string)$cat['id']) ?>"
+									<?= in_array($cat['id'], $selectedCats, true) ? 'checked="checked"' : '' ?> />
+								<?= $e($cat['name']) ?>
+							</label>
+							<details class="dd-cat-prompt">
+								<summary>⚙ <?= $e(_t('ext.daily_digest.schedule.category_settings')) ?><?= $hasSettings ? $e(_t('ext.daily_digest.schedule.category_settings_set')) : '' ?></summary>
+								<textarea name="cat_prompt[<?= $e((string)$cat['id']) ?>]" rows="6" class="long"
+									placeholder="<?= $e(_t('ext.daily_digest.schedule.category_prompt_placeholder')) ?>"><?= $e($catPrompt) ?></textarea>
+								<label class="dd-cat-excerpt"><?= $e(_t('ext.daily_digest.schedule.category_excerpt_length')) ?>
+									<input type="number" name="cat_excerpt[<?= $e((string)$cat['id']) ?>]" min="0" max="5000"
+										value="<?= $e($catExcerpt === null ? '' : (string)$catExcerpt) ?>"
+										placeholder="<?= $e(_t('ext.daily_digest.schedule.category_excerpt_placeholder', (int)$val('excerpt_length', DailyDigestExtension::DEFAULT_EXCERPT_LENGTH))) ?>" />
+								</label>
+							</details>
+						</div>
 					<?php endforeach; ?>
 					<p class="help-block"><?= _t('ext.daily_digest.schedule.categories_help') ?></p>
+					<p class="help-block"><?= $e(_t('ext.daily_digest.schedule.category_settings_help')) ?></p>
 				</div>
 			</div>
 
@@ -206,52 +270,6 @@ if (Minz_Request::paramBoolean('ajax')) {
 					<input type="number" id="dd_excerpt_length" name="excerpt_length" min="0" max="5000"
 						value="<?= $e($val('excerpt_length', DailyDigestExtension::DEFAULT_EXCERPT_LENGTH)) ?>" />
 					<p class="help-block"><?= _t('ext.daily_digest.schedule.excerpt_length_help') ?></p>
-				</div>
-			</div>
-		</fieldset>
-
-		<fieldset>
-			<legend><?= _t('ext.daily_digest.output.title') ?></legend>
-
-			<div class="form-group">
-				<label class="group-name" for="dd_language"><?= _t('ext.daily_digest.output.language') ?></label>
-				<div class="group-controls">
-					<input type="text" id="dd_language" name="language" value="<?= $e($this->language($cfg)) ?>" />
-					<p class="help-block"><?= _t('ext.daily_digest.output.language_help', $e(DailyDigestExtension::defaultLanguage())) ?></p>
-				</div>
-			</div>
-
-			<div class="form-group">
-				<label class="group-name" for="dd_prompt"><?= _t('ext.daily_digest.output.prompt') ?></label>
-				<div class="group-controls">
-					<textarea id="dd_prompt" name="prompt" rows="14" class="long" style="width:100%;"><?= $e($this->prompt($cfg)) ?></textarea>
-					<p class="help-block"><?= _t('ext.daily_digest.output.prompt_help') ?></p>
-				</div>
-			</div>
-
-			<div class="form-group">
-				<label class="group-name" for="dd_feed_name"><?= _t('ext.daily_digest.output.feed_name') ?></label>
-				<div class="group-controls">
-					<input type="text" id="dd_feed_name" name="feed_name" value="<?= $e($feedName) ?>" />
-					<p class="help-block"><?= _t('ext.daily_digest.output.feed_name_help', $e($feedName)) ?></p>
-				</div>
-			</div>
-
-			<div class="form-group">
-				<label class="group-name" for="dd_internal_base"><?= _t('ext.daily_digest.output.internal_base') ?></label>
-				<div class="group-controls">
-					<input type="url" id="dd_internal_base" name="internal_base" class="long"
-						value="<?= $e($val('internal_base')) ?>" placeholder="<?= $e(_t('ext.daily_digest.output.internal_base_placeholder')) ?>" />
-					<p class="help-block"><?= _t('ext.daily_digest.output.internal_base_help') ?></p>
-				</div>
-			</div>
-
-			<div class="form-group">
-				<div class="group-controls">
-					<label class="checkbox" for="dd_mark_read">
-						<input type="checkbox" id="dd_mark_read" name="mark_read" value="1" <?= !empty($cfg['mark_read']) ? 'checked="checked"' : '' ?> />
-						<?= _t('ext.daily_digest.output.mark_read') ?>
-					</label>
 				</div>
 			</div>
 		</fieldset>

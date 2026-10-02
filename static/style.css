@@ -1,0 +1,48 @@
+/* Configure page only: FreshRSS' CSP (default-src 'self') ignores inline styles, hence this file. */
+
+.dd-cat {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.25rem 0.75rem;
+}
+
+.dd-cat .checkbox {
+	margin: 0;
+}
+
+.dd-cat .dd-cat-prompt summary {
+	font-size: 0.85em;
+	opacity: 0.7;
+	cursor: pointer;
+}
+
+/* Opened: the editor takes its own full-width row below the category name. */
+.dd-cat .dd-cat-prompt[open] {
+	flex-basis: 100%;
+}
+
+.dd-cat .dd-cat-prompt textarea {
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0.25rem 0 0.5rem;
+}
+
+.dd-cat .dd-cat-excerpt {
+	display: block;
+	margin: 0 0 0.5rem;
+	font-size: 0.9em;
+}
+
+.dd-cat .dd-cat-excerpt input {
+	width: 7em;
+}
+
+/* Only checked categories show the category settings. */
+.dd-cat:has(input[type="checkbox"]:not(:checked)) .dd-cat-prompt {
+	display: none;
+}
+
+#dd_prompt {
+	width: 100%;
+}

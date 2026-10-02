@@ -92,6 +92,7 @@ final class DailyDigestExtension extends Minz_Extension {
 	public function init(): void {
 		parent::init();
 		$this->registerTranslates();
+		Minz_View::appendStyle($this->getFileUrl('style.css'));
 		// Hook names given as strings: registerHook() accepts Minz_HookType only since FreshRSS 1.29
 		$this->registerHook(Minz_HookType::FreshrssUserMaintenance->value, [$this, 'onUserMaintenance']);
 		$this->registerHook(Minz_HookType::EntryBeforeDisplay->value, [$this, 'absolutizeInternalLinks']);
@@ -238,6 +239,20 @@ final class DailyDigestExtension extends Minz_Extension {
 			return [];
 		}
 		return array_values(array_unique(array_map('intval', array_filter($cats, 'is_numeric'))));
+	}
+
+	/** @param array<string,mixed> $cfg */
+	public function categoryPrompt(array $cfg, int $catId): string {
+		$all = $cfg['cat_prompts'] ?? null;
+		$prompt = is_array($all) ? ($all[(string)$catId] ?? null) : null;
+		return is_string($prompt) ? trim($prompt) : '';
+	}
+
+	/** @param array<string,mixed> $cfg */
+	public function categoryExcerptLength(array $cfg, int $catId): ?int {
+		$all = $cfg['cat_excerpts'] ?? null;
+		$length = is_array($all) ? ($all[(string)$catId] ?? null) : null;
+		return is_numeric($length) ? max(0, min(5000, (int)$length)) : null;
 	}
 
 	/** @param array<string,mixed>|null $cfg */
@@ -670,7 +685,7 @@ final class DailyDigestExtension extends Minz_Extension {
 	 * @return array{0:string,1:string} [system prompt, user prompt]
 	 */
 	public static function buildPrompts(string $prompt, string $language, array $items, int $total, int $windowStart, int $windowEnd,
-		?string $categoryName): array {
+		?string $categoryName, string $categoryPrompt = ''): array {
 		$lines = [];
 		foreach ($items as $n => $it) {
 			$line = '[' . $n . '] ' . $it['title'] . ' | ' . $it['feed'] . ' | ' . $it['category'];
@@ -684,7 +699,13 @@ final class DailyDigestExtension extends Minz_Extension {
 		$header .= sprintf("Time window: %s to %s. %d new articles%s.\n\n",
 			date('Y-m-d H:i', $windowStart), date('Y-m-d H:i', $windowEnd), $total,
 			count($items) < $total ? '; only the newest ' . count($items) . ' are listed below' : '');
-		$systemPrompt = str_replace('{language}', $language, trim($prompt) . "\n" . self::FORMAT_RULES);
+		$systemPrompt = trim($prompt);
+		if ($categoryName !== null && $categoryPrompt !== '') {
+			$systemPrompt .= "\n\n" . sprintf(self::tr('ext.daily_digest.digest.category_prompt_heading',
+				'Additional requirements for the category "%s" (they take precedence over the general requirements above):'),
+				$categoryName) . "\n" . $categoryPrompt;
+		}
+		$systemPrompt = str_replace('{language}', $language, $systemPrompt . "\n" . self::FORMAT_RULES);
 		return [$systemPrompt, $header . implode("\n", $lines)];
 	}
 
@@ -701,7 +722,8 @@ final class DailyDigestExtension extends Minz_Extension {
 			throw new Exception(_t('ext.daily_digest.error.api_incomplete'));
 		}
 		$maxArticles = self::cfgInt($cfg, 'max_articles', self::DEFAULT_MAX_ARTICLES, 5, 1000);
-		$excerptLen = self::cfgInt($cfg, 'excerpt_length', self::DEFAULT_EXCERPT_LENGTH, 0, 5000);
+		$categoryExcerptLen = $cat === null ? null : $this->categoryExcerptLength($cfg, $cat['id']);
+		$excerptLen = $categoryExcerptLen ?? self::cfgInt($cfg, 'excerpt_length', self::DEFAULT_EXCERPT_LENGTH, 0, 5000);
 		$markRead = (bool)($cfg['mark_read'] ?? false);
 		$logTag = $cat === null ? '' : '[' . $cat['name'] . '] ';
 
@@ -752,8 +774,9 @@ final class DailyDigestExtension extends Minz_Extension {
 			return ['status' => 'empty', 'message' => $msg];
 		}
 
+		$categoryPrompt = $cat === null ? '' : $this->categoryPrompt($cfg, $cat['id']);
 		[$systemPrompt, $userPrompt] = self::buildPrompts($this->prompt($cfg), $this->language($cfg), $items, $total,
-			$windowStart, $windowEnd, $cat === null ? null : $cat['name']);
+			$windowStart, $windowEnd, $cat === null ? null : $cat['name'], $categoryPrompt);
 
 		$started = microtime(true);
 		[$body, $usage, $modelLabel] = $this->callWithFallback($cfg, $systemPrompt, $userPrompt, $logTag);
@@ -767,7 +790,7 @@ final class DailyDigestExtension extends Minz_Extension {
 		$body = self::numberSections($body, $this->language($cfg));
 
 		$html = self::assembleDigest($body, $items, $cat === null ? null : $cat['name'], $windowStart, $windowEnd, $dropped,
-			$modelLabel, $elapsed, $usage);
+			$modelLabel, $elapsed, $usage, $categoryPrompt !== '', $categoryExcerptLen);
 
 		$refDt = (new DateTimeImmutable('@' . $refTs))->setTimezone(self::tz());
 		if ($cat === null) {
@@ -836,7 +859,8 @@ final class DailyDigestExtension extends Minz_Extension {
 	 * @param array<mixed> $usage
 	 */
 	public static function assembleDigest(string $body, array $items, ?string $categoryName, int $windowStart, int $windowEnd,
-		int $dropped, string $modelLabel, float $elapsed, array $usage): string {
+		int $dropped, string $modelLabel, float $elapsed, array $usage, bool $categoryPromptUsed = false,
+		?int $categoryExcerptLen = null): string {
 		$meta = [];
 		if ($categoryName !== null) {
 			$meta[] = _t('ext.daily_digest.digest.meta_category', $categoryName);
@@ -845,6 +869,12 @@ final class DailyDigestExtension extends Minz_Extension {
 		$meta[] = _t('ext.daily_digest.digest.meta_articles', count($items))
 			. ($dropped > 0 ? _t('ext.daily_digest.digest.meta_dropped', $dropped) : '');
 		$meta[] = _t('ext.daily_digest.digest.meta_model', $modelLabel);
+		if ($categoryPromptUsed) {
+			$meta[] = _t('ext.daily_digest.digest.meta_category_prompt');
+		}
+		if ($categoryExcerptLen !== null) {
+			$meta[] = _t('ext.daily_digest.digest.meta_excerpt', $categoryExcerptLen);
+		}
 		return '<div class="' . self::CONTENT_CLASS . '">'
 			. '<p><em>' . self::h(implode(' · ', $meta)) . '</em></p>'
 			. $body
@@ -1580,6 +1610,26 @@ final class DailyDigestExtension extends Minz_Extension {
 		$newKey = Minz_Request::paramString('api_key', true);
 		$apiKey = Minz_Request::paramBoolean('clear_api_key') ? '' : ($newKey !== '' ? $newKey : self::cfgString($old, 'api_key'));
 		$prompt = trim(str_replace("\r\n", "\n", Minz_Request::paramString('prompt', true)));
+		$catPrompts = [];
+		foreach (Minz_Request::paramArrayString('cat_prompt', true) as $k => $v) {
+			if (!is_numeric($k)) {
+				continue;
+			}
+			$v = trim(str_replace("\r\n", "\n", $v));
+			if ($v !== '') {
+				$catPrompts[(string)(int)$k] = $v;
+			}
+		}
+		$catExcerpts = [];
+		foreach (Minz_Request::paramArrayString('cat_excerpt', true) as $k => $v) {
+			if (!is_numeric($k)) {
+				continue;
+			}
+			$v = trim($v);
+			if ($v !== '' && ctype_digit($v)) {
+				$catExcerpts[(string)(int)$k] = max(0, min(5000, (int)$v));
+			}
+		}
 
 		$newFbKey = Minz_Request::paramString('fallback_key', true);
 		$fbKey = Minz_Request::paramBoolean('clear_fallback_key') ? '' : ($newFbKey !== '' ? $newFbKey : self::cfgString($old, 'fallback_key'));
@@ -1601,6 +1651,8 @@ final class DailyDigestExtension extends Minz_Extension {
 			'times' => self::formatTimes($times === [] ? self::parseTimes(self::DEFAULT_TIMES) : $times),
 			'mode' => Minz_Request::paramString('mode') === self::MODE_PER_CATEGORY ? self::MODE_PER_CATEGORY : self::MODE_COMBINED,
 			'categories' => Minz_Request::paramArrayInt('categories'),
+			'cat_prompts' => $catPrompts,
+			'cat_excerpts' => $catExcerpts,
 			'max_articles' => max(5, min(1000, Minz_Request::paramInt('max_articles') ?: self::DEFAULT_MAX_ARTICLES)),
 			'excerpt_length' => max(0, min(5000, Minz_Request::paramIntNull('excerpt_length') ?? self::DEFAULT_EXCERPT_LENGTH)),
 			// Empty = follow the defaults (interface language, translated prompt and feed name)

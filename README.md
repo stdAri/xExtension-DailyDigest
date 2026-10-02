@@ -12,6 +12,7 @@ Each digest opens with the key stories of the period, followed by numbered topic
 - Any OpenAI-compatible endpoint: OpenAI, Gemini (OpenAI-compatible endpoint), Kimi, a local model, … Only standard fields (`model` / `messages` / `stream`) are sent.
 - Optional **fallback model** (endpoint + key + model): used when the primary returns an empty completion (e.g. content-moderation aborts) or keeps failing after a retry.
 - Configurable schedule, article cap, excerpt length, target language, prompt and feed name.
+- Per-category prompt supplements and excerpt length overrides, applied only to per-category digests.
 - Plain-markup layout (headings, lists, bold, dividers — no CSS), so digests look the same in the web UI and in reader apps that drop inline styles.
 - Citations link into FreshRSS (`/i/?…` deep links) and to the original website; relative links are made absolute for API clients (Reeder, NetNewsWire, …) at display time.
 - Retry policy with transient-error detection, per-slot attempt cap, and a lock file against concurrent runs.
@@ -35,16 +36,20 @@ Each digest opens with the key stories of the period, followed by numbered topic
 
 **Settings → Extensions → Daily Digest → ⚙**
 
+Settings are ordered **API → Fallback → Output → Schedule and scope**, so the general prompt appears before the category settings.
+
 - **API endpoint / key / model**: any OpenAI-compatible API; `/chat/completions` is appended to the endpoint automatically. A saved key is never displayed again.
 - **Fallback model (optional)**: secondary endpoint / key / model — all three required, empty = disabled. Used when the primary model returns an empty completion (content-moderation abort) or still fails after one retry.
+- **Output**: target language, general prompt and feed name.
+- **Base URL for in-FreshRSS links**: leave empty for relative `/i/?…` links (works in the web UI over any host); third-party clients that cannot resolve relative links need the full URL of your FreshRSS, e.g. `https://freshrss.example.com` (applies to future digests only).
+- **Mark source articles as read**: off by default.
 - **Digest times**: comma-separated `HH:MM`, default `08:00,20:00`.
 - **Mode**:
   - **Combined** (default): one digest over the selected categories, stored in the digest feed.
   - **Per category**: one digest per checked category, stored in feeds named `<feed name> · <category>` (auto-created, muted, placeholder URL `https://daily-digest.invalid/<user>/category-<id>`; recreated if deleted).
 - **Categories**: in combined mode, none checked = all categories; in per-category mode, only checked categories get digests. The category holding the digest feeds is not listed.
-- **Max articles per digest** (default 150, newest kept), **excerpt length** (default 400 chars), **target language**, **prompt**, **feed name**.
-- **Base URL for in-FreshRSS links**: leave empty for relative `/i/?…` links (works in the web UI over any host); third-party clients that cannot resolve relative links need the full URL of your FreshRSS, e.g. `https://freshrss.example.com` (applies to future digests only).
-- **Mark source articles as read**: off by default.
+- **Category settings**: expand ⚙ beside a checked category to add a prompt supplement and/or an excerpt length override (0–5000 characters). The panel shows “(set)” when either is configured. Both settings apply only in per-category mode.
+- **Max articles per digest** (default 150, newest kept), **global excerpt length** (default 400 chars; 0 = titles only).
 - Buttons: **Test API connection**, **Generate now** (manual run, 1–5 minutes; per-category mode generates each checked category in turn and reports per-category results on the page).
 
 ## How it works
@@ -63,6 +68,8 @@ Each digest opens with the key stories of the period, followed by numbered topic
 ### Per-category mode
 
 - Shares the schedule with combined mode. One cron run calls the LLM once per checked category (N categories ≈ N calls, N× the tokens).
+- **Prompt supplement** (`cat_prompts`, keyed by category ID): appended after the general prompt, with a heading naming the category. It takes precedence over conflicting general requirements. `{language}` is replaced in both prompts; the mandatory output format rules are always appended last and cannot be overridden.
+- **Excerpt length override** (`cat_excerpts`, keyed by category ID): leave empty to use the global setting, or set 0–5000 characters (0 = titles only). Longer excerpts cost proportionally more input tokens for that category. The digest meta line indicates when a category prompt or excerpt override was used, including the overridden length.
 - Each category tracks its own window (`last_entry_id`) and failure count: one failing category does not block the others, and only failed categories are retried on the next cron run (max 3 attempts per slot per category). After 2 consecutive category failures within one run, the rest is postponed to the next cron run, to avoid hammering a broken API. The slot counts as done once every category succeeded or gave up.
 - A category's **first** digest covers the last 12 hours, but never articles already covered by a combined digest. Later digests go back at most 48 hours (e.g. after re-checking a long-unchecked category).
 - Switching back to combined mode continues the combined window from the last per-category run, so already-digested articles are not repeated (articles from unchecked categories are not back-filled).
@@ -73,6 +80,7 @@ Each digest opens with the key stories of the period, followed by numbered topic
 
 ## Notes
 
+- The configuration page uses `static/style.css`, registered with `Minz_View::appendStyle()`: FreshRSS’ `default-src 'self'` Content Security Policy ignores inline styles. The stylesheet controls the category settings panels and the general prompt textarea width; keep it with the extension when installing or updating.
 - Digests are generated by the first cron run at or after each scheduled time. With a `*/45` cron, 08:00 and 20:00 land exactly on schedule, while e.g. 08:10 waits until 08:45.
 - The digest feeds use placeholder URLs (`https://daily-digest.invalid/<user>`, per-category `…/category-<id>`) and are muted, so they are never refreshed automatically; pressing their "refresh" button manually shows an error you can ignore.
 - Some providers abort on sensitive content mid-completion (empty content, `finish_reason: null`, zero tokens). The log reports this as a likely content-moderation abort; the fallback model (if configured) takes over for that digest, otherwise that digest fails.

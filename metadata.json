@@ -2,7 +2,7 @@
 	"name": "Daily Digest",
 	"author": "stdAri",
 	"description": "Scheduled AI digests of new articles (combined or per category) with numbered citations linking to the articles inside FreshRSS. Any OpenAI-compatible API, optional fallback model.",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"entrypoint": "DailyDigest",
 	"type": "user",
 	"compatibility": "1.28.0",
